@@ -1,0 +1,360 @@
+---
+title: "assigment_week2_20180819"
+author: "Harold Pollack"
+date: "8/19/2018"
+output: html_document
+---
+
+
+This assignment analyzes an activity dataset of steps per five-minute interval, and analyzes the data. It provides practice producing an R markdown file and committing it to GitHub.
+
+```{r setup, warning=FALSE}
+library("dplyr", lib.loc="/Library/Frameworks/R.framework/Versions/3.4/Resources/library")
+library("forecast", lib.loc="/Library/Frameworks/R.framework/Versions/3.4/Resources/library")
+library("knitr", lib.loc="/Library/Frameworks/R.framework/Versions/3.4/Resources/library")
+library("ggplot2", lib.loc="/Library/Frameworks/R.framework/Versions/3.4/Resources/library")
+library("xts", lib.loc="/Library/Frameworks/R.framework/Versions/3.4/Resources/library")
+library("gridExtra", lib.loc="/Library/Frameworks/R.framework/Versions/3.4/Resources/library")
+library("urca", lib.loc="/Library/Frameworks/R.framework/Versions/3.4/Resources/library")
+library("ggpubr", lib.loc="/Library/Frameworks/R.framework/Versions/3.4/Resources/library")
+library("VGAM")
+library("maxLik")
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This markdown file reads and processes activity.csv
+We begin by using read.csv to read the activity dataset, and printing out some descriptives.
+
+```{r read dataset, warning=FALSE}
+activity <- read.csv("/Users/haroldpollack/Documents/coursera_datascience3/activity.csv")
+activity$lsteps<-log(1+activity$steps)
+# table(activity$date)
+activity$day <-weekdays(as.Date(activity$date))
+table(activity$day)
+# table(activity$interval)
+str(activity)
+summary(activity)
+```
+
+Now show some histograms of the step distribution. 
+I also show histographs of log of steps, with and without zeros omitted.
+
+```{r Histograms on the level and log scale, warning=FALSE}
+qplot(activity$steps, 
+      geom="histogram",
+      binwidth=50,  
+      main="Histogram of Steps over the entire dataset", 
+      fill=I("blue"), 
+      xlab = "Steps"
+      ) 
+qplot(activity$lsteps, 
+      geom="histogram",
+      binwidth=1,  
+      main="Histogram of Steps shown on log scale", 
+      fill=I("blue"), 
+      xlab = "log(1+Steps)"
+      ) 
+## log of steps
+# hist(activity$lsteps, 
+#      breaks = 10,  
+#      main="Histogram of Steps shown on log scale", 
+#      fill=I("blue"),
+#      xlab = "log(1+Steps)"
+#      ) 
+#
+# for the heck of it, let's make a log histogram for the positive values
+#
+activity$logsteps2 <- log(activity$steps)
+# str(activity$logsteps2)
+# hist(activity$logsteps2, 
+#      breaks = 10,  
+#      main="Histogram of Steps shown on log scale--zeros omitted", 
+#      fill=I("blue"),
+#      xlab = "log(Steps), zeros omitted"
+#      ) 
+qplot(activity$logsteps2, 
+      geom="histogram",
+      binwidth=1,  
+      main="Histogram of Steps shown on log scale", 
+      fill=I("blue"), 
+      xlab = "log(Steps) for positive steps"
+      ) 
+```
+
+Find which days are weekends
+
+```{R weekends, warning=FALSE}
+charday <- as.character(activity$day)
+table(charday)
+dSunday<-as.numeric((activity$day=="Sunday"))
+dMonday<-as.numeric((activity$day=="Monday"))
+dTuesday<-as.numeric((activity$day=="Tuesday"))
+dWednesday<-as.numeric((activity$day=="Wednesday"))
+dThursday<-as.numeric((activity$day=="Thursday"))
+dFriday<-as.numeric((activity$day=="Friday"))
+dSaturday<-as.numeric((activity$day=="Saturday"))
+dweekend<-dSunday+dSaturday
+table(dweekend)
+#
+# put dweekend into the activity dataset
+#
+activity$dweekend <- dweekend
+# 
+#    Don't full understand why the below code is wrong
+#
+# if (activity$day=="Saturday") {week_factor<-"Weekend"
+# } else if (activity$day=="Sunday") {week_factor<-"Weekend"
+# } else if (activity$day=="Monday") {week_factor<-"Weekday"
+# } else if (activity$day=="Tuesday") {week_factor<-"Weekday"
+# } else if (activity$day=="Wednesday") {week_factor<-"Weekday"
+# } else if (activity$day=="Thursday") {week_factor<-"Weekday"
+# } else if (activity$day=="Friday") {week_factor<-"Weekday"}
+
+# table(week_factor)
+```
+
+Now find median and mean of steps
+```{R descriptives}
+steps_median <- median(activity$steps, na.rm = TRUE)
+steps_mean <- mean(activity$steps, na.rm = TRUE)
+# steps_median
+# steps_mean
+```
+
+The median number of steps is `r steps_median`.
+The mean number of steps is `r steps_mean`.
+
+Now handle missing values. I replaced with nonnegative predicted values based on a simple regression with day dummies and interval dummies. I then forced the values to be non-negative. A slightly better model would employ censored regression or something like that.
+
+
+```{R missing values and aggregation, warning=FALSE}
+activity$missing_steps <- as.numeric(is.na(activity$steps))
+# table(activity$missing_steps)
+n_missing <- sum(activity$missing_steps)
+```
+
+There are `r n_missing` observations with missing steps. 
+Now let's run some regressions with non-interacted day and interval dummies for imputation. I would use a more complex approach or at least a Tobit specification for a more substantive problem.
+
+``` {R regression and imputation}
+#
+#  regression model with non-interacted day and interval dummies
+#
+model_steps <- lm(steps ~ as.factor(day)+as.factor(interval), data=activity)
+# summary(model_steps)
+activity$pred_steps=predict(model_steps,activity)
+summary(activity$pred_steps)
+# str(activity$pred_steps)
+#
+#   set imputed steps to steps when the observations are there
+#
+activity$imputed_steps<-activity$steps
+# summary(activity$imputed_steps)
+# str(activity$imputed_steps)
+# 
+#    Still don't see why the below code is wrong. Looping through observations works 
+# better
+#
+# if (activity$missing_steps==1) {activity$imputed_steps<-activity$pred_steps
+# } else if (activity$missing_steps==0) {activity$imputed_steps<-activity$steps}
+# if (activity$missing_steps==1) {activity$imputed_steps_missing<-activity$pred_steps
+#
+# loop through each observation
+#
+#    Now loop through each observation for the imputation when steps
+#    is missing
+#
+for(i in 1:nrow(activity))
+{
+  activity$imputed_steps[i]<- activity$steps[i]
+  if(activity$missing_steps[i] == 1)
+  {
+    # 
+    #    Note that I want predicted values to be nonnegative. Which I do below.
+    #
+    activity$imputed_steps[i] <- max(0,activity$pred_steps[i])
+  }
+}
+# summary(activity$imputed_steps_missing)
+# str(activity$imputed_steps_missing)
+
+# summary(activity$steps)
+summary(activity$imputed_steps)
+# summary(activity$missing_steps)
+# str(activity$steps)
+# str(activity$imputed_steps)
+# str(activity$missing_steps)
+imputed_steps <- activity$imputed_steps
+activity_date <- activity$date
+interval <-activity$interval
+```
+
+Now deal with daily averages using aggregate.
+
+```{R now deal with daily averages, warning=FALSE}
+#
+# First compute average by interval
+#
+# agg_interval_steps <-
+#  aggregate(activity, by=list(interval), 
+#  FUN=mean, na.rm=TRUE)
+day_imputed_steps <- aggregate(imputed_steps,list(activity_day= activity_date),sum)
+day_imputed_steps$daily_steps <- day_imputed_steps$x
+str(day_imputed_steps)
+summary(day_imputed_steps$daily_steps)
+#
+# now average intervals
+#
+interval_imputed_steps <- aggregate(imputed_steps,list(activity_interval= interval),mean)
+interval_imputed_steps$interval_steps_imputed <- interval_imputed_steps$x
+# str(interval_imputed_steps)
+summary(interval_imputed_steps)
+interval_median_steps <-median(interval_imputed_steps$interval_steps_imputed, na.rm = TRUE)
+interval_mean_steps <-mean(interval_imputed_steps$interval_steps_imputed, na.rm = TRUE)
+#
+# day_imputed_steps
+```
+The median number of steps per interval is `r interval_median_steps`.
+The mean number of steps per interval is `r interval_mean_steps`.
+
+Now find the interval with the largest average number of (imputed) steps, and the corresponding number of steps
+
+```{R maximum imputed steps}
+#
+#  find the maximum imputed steps
+#
+interval_with_max_steps <- which.max(interval_imputed_steps$interval_steps_imputed)
+# 
+# maximum value
+#
+max_interval_steps <- max(interval_imputed_steps$interval_steps_imputed)
+```
+
+The interval with the maximum number of imputed mean steps is `r interval_with_max_steps`, with a mean number of imputed steps of `r max_interval_steps`.
+
+Now show some graphs
+
+``` {R graphs, warning=FALSE}
+## log of steps
+qplot(day_imputed_steps$daily_steps , 
+      geom="histogram",
+      binwidth=1500,  
+      main="Histogram of daily steps", 
+      fill=I("blue"), 
+      xlab = "average number of steps per day--with imputation"
+      ) 
+
+# hist(day_imputed_steps$daily_steps , 
+#       breaks = 10,  
+#      main="Histogram of daily steps", 
+#      xlab = "average number of steps per day--with imputation",
+#      ) 
+#
+# time series by day
+#
+plot(as.Date(day_imputed_steps$activity_day),day_imputed_steps$daily_steps)
+# ggplot(day_imputed_steps)+geom_line(aes(x=activity_day,y=daily_steps))
+#
+#   Time series by 5-minute interval
+#
+qplot(interval_imputed_steps$interval_steps_imputed , 
+      geom="histogram",
+      binwidth=10,  
+      main="Histogram of daily steps", 
+      fill=I("blue"), 
+      xlab = "average number of steps per day--with imputation"
+      ) 
+
+hist(interval_imputed_steps$interval_steps_imputed, 
+      breaks = 10,  
+      main="Histogram of interval steps, averaged over all days",
+      xlab = "average number of steps per interval--with imputation",
+      ) 
+plot(interval_imputed_steps$activity_interval,interval_imputed_steps$interval_steps_imputed)
+```
+
+Now let's examine the weekend/weekday comparison. first the math...
+
+```{R weekend stuff, warning=FALSE}
+#
+# loop through each observation and set up weekend and weekday variables
+#
+day_imputed_steps$day <- weekdays(as.Date(day_imputed_steps$activity_day))
+# table(day_imputed_steps$day)
+day_imputed_steps$dSunday<-as.numeric((day_imputed_steps$day=="Sunday"))
+day_imputed_steps$dSaturday<-as.numeric((day_imputed_steps$day=="Saturday"))
+# table(day_imputed_steps$dSunday)
+# table(day_imputed_steps$dSaturday)
+day_imputed_steps$dweekend<-day_imputed_steps$dSunday+day_imputed_steps$dSaturday
+# table(day_imputed_steps$dweekend)
+#
+for(i in 1:nrow(day_imputed_steps))
+ {
+  if(day_imputed_steps$dweekend[i] == 1)
+   {
+    # 
+    #    weekend value
+    #
+     day_imputed_steps$weekend_steps[i] <- day_imputed_steps$daily_steps[i]
+     day_imputed_steps$weekday_steps[i] <- NA
+   } else if (day_imputed_steps$dweekend[i] == 0) 
+   {  
+    # 
+    #    weekday value
+    #
+    day_imputed_steps$weekday_steps[i] <- day_imputed_steps$daily_steps[i]
+    day_imputed_steps$weekend_steps[i] <- NA
+    }
+ }
+ # str(day_imputed_steps$weekday_steps)
+ # str(day_imputed_steps$weekend_steps)
+ summary(day_imputed_steps$weekday_steps)
+ summary(day_imputed_steps$weekend_steps)
+weekday_interval_median_steps <-round(median(day_imputed_steps$weekday_steps, na.rm = TRUE))
+weekday_interval_mean_steps <-round(mean(day_imputed_steps$weekday_steps, na.rm = TRUE))
+weekend_interval_median_steps <-round(median(day_imputed_steps$weekend_steps, na.rm = TRUE))
+weekend_interval_mean_steps <-round(mean(day_imputed_steps$weekend_steps, na.rm = TRUE))
+# weekday_interval_median_steps
+# weekday_interval_mean_steps
+# weekend_interval_median_steps
+# weekend_interval_mean_steps
+```
+
+The median numbers of weekday_steps is `r weekday_interval_median_steps`.
+The mean numbers of weekday_steps is `r weekday_interval_mean_steps`.
+
+The median numbers of weekend_steps is `r weekend_interval_median_steps`.
+The mean numbers of weekend_steps is `r weekend_interval_mean_steps`.
+
+```{R now the plots}
+ # q1 <- plot(as.Date(day_imputed_steps$activity_day),day_imputed_steps$weekend_steps)
+ # q2 <- plot(as.Date(day_imputed_steps$activity_day),day_imputed_steps$weekday_steps)
+ plot(as.Date(day_imputed_steps$activity_day),day_imputed_steps$weekend_steps)
+ plot(as.Date(day_imputed_steps$activity_day),day_imputed_steps$weekday_steps)
+ qplot(day_imputed_steps$weekday_steps , 
+      geom="histogram",
+      binwidth=1000,  
+      main="Histogram of steps, averaged over weekdays", 
+      fill=I("blue"), 
+       xlab = "Average number of steps--with imputation",
+      ) 
+  qplot(day_imputed_steps$weekend_steps , 
+      geom="histogram",
+      binwidth=1000,  
+      main="Histogram of steps, averaged over weekend", 
+      fill=I("blue"), 
+       xlab = "Average number of steps--with imputation",
+      ) 
+
+ hist(day_imputed_steps$weekday_steps, 
+      breaks = 15,  
+      main="Histogram of interval steps, averaged over weekdays",
+      xlab = "Average number of steps per interval--with imputation",
+      ) 
+hist(day_imputed_steps$weekend_steps, 
+      breaks = 10,  
+     main="Histogram of interval steps, averaged over weekends",
+      xlab = "Average number of steps per interval--with  imputation",
+      ) 
+ ggarrange(plot(as.Date(day_imputed_steps$activity_day),day_imputed_steps$weekend_steps, xlab = "Weekend data",ylab = "Average number of steps per interval--weekend"), plot(as.Date(day_imputed_steps$activity_day),day_imputed_steps$weekday_steps, xlab = "Weekday data",ylab = "Average number of steps per interval--weekday"), widths = c(1,2))
+```
